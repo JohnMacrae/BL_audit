@@ -1,0 +1,8 @@
+services:
+  bl-audit:
+    build: .
+    env_file: .env
+    volumes:
+      - /volume1/docker/gmail-mcp/gmail_client.py:/gmail/gmail_client.py:ro
+      - /volume1/docker/gmail-mcp/config/jramacrae:/gmail-config:ro
+    network_mode: bridge
