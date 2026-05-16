@@ -51,7 +51,10 @@ def _compute_stage(
         return 1, STAGE_LABELS[1]
     if active_dress_txn["bal_due"] == 0.0:
         return 6, STAGE_LABELS[6]
+    is_layaway = active_dress_txn["prefix"] == "L"
     if has_receiving:
+        return 5, STAGE_LABELS[5]
+    if is_layaway and active_dress_txn["bal_due"] < active_dress_txn["trx_total"]:
         return 5, STAGE_LABELS[5]
     if has_po:
         return 4, STAGE_LABELS[4]
@@ -98,10 +101,11 @@ def _collect_flags(record: "CustomerRecord") -> list[str]:
     if txn["bal_due"] > 0:
         flags.append(f"Balance outstanding: £{txn['bal_due']:.2f}")
 
-    if txn["is_dress_order"] and not record["has_purchase_order"]:
+    is_layaway = txn["prefix"] == "L"
+    if not is_layaway and txn["is_dress_order"] and not record["has_purchase_order"]:
         flags.append("No Purchase Order raised")
 
-    if record["has_purchase_order"] and not record["has_receiving"]:
+    if not is_layaway and record["has_purchase_order"] and not record["has_receiving"]:
         flags.append("Dress not yet received")
 
     return flags

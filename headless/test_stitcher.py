@@ -250,16 +250,27 @@ class TestComputeStage:
         assert label == "Dress Selected"
 
     def test_stage_3_deposit_paid(self):
-        txn = _make_txn(bal_due=500.0, trx_total=1000.0)
+        txn = _make_txn(prefix="SO", bal_due=500.0, trx_total=1000.0)
         stage, label = _compute_stage(txn, False, False)
         assert stage == 3
         assert label == "Deposit Paid"
 
     def test_stage_4_has_po(self):
-        txn = _make_txn(bal_due=500.0, trx_total=1000.0)
+        txn = _make_txn(prefix="SO", bal_due=500.0, trx_total=1000.0)
         stage, label = _compute_stage(txn, True, False)
         assert stage == 4
         assert label == "Ordered"
+
+    def test_layaway_deposit_paid_jumps_to_stage_5(self):
+        txn = _make_txn(prefix="L", bal_due=500.0, trx_total=1000.0)
+        stage, label = _compute_stage(txn, False, False)
+        assert stage == 5
+        assert label == "In Store"
+
+    def test_layaway_no_deposit_stays_stage_2(self):
+        txn = _make_txn(prefix="L", bal_due=1000.0, trx_total=1000.0)
+        stage, label = _compute_stage(txn, False, False)
+        assert stage == 2
 
     def test_stage_5_has_receiving(self):
         txn = _make_txn(bal_due=500.0, trx_total=1000.0)
@@ -333,10 +344,10 @@ class TestComputeRisk:
 # ---------------------------------------------------------------------------
 
 def _make_record(active_dress_txn=None, has_po=False, has_receiving=False,
-                 days_to_wedding=100, bal_due=0.0, is_dress_order=True):
+                 days_to_wedding=100, bal_due=0.0, is_dress_order=True, prefix="SO"):
     txn = None
     if active_dress_txn is not None:
-        txn = _make_txn(bal_due=bal_due, trx_total=1000.0, is_dress=is_dress_order)
+        txn = _make_txn(prefix=prefix, bal_due=bal_due, trx_total=1000.0, is_dress=is_dress_order)
     return {
         "customer_name": "Alice Brown",
         "email": "", "mobile": "",
@@ -345,7 +356,9 @@ def _make_record(active_dress_txn=None, has_po=False, has_receiving=False,
         "has_receiving": has_receiving,
         "wedding_date": date(2026, 6, 14),
         "days_to_wedding": days_to_wedding,
+        "expected_delivery": None,
         "stage": 3, "stage_label": "Deposit Paid",
+        "sale_status": "sold",
         "risk_level": "ok", "risk_reason": "", "flags": [],
     }
 
@@ -366,15 +379,29 @@ class TestCollectFlags:
         flags = _collect_flags(record)
         assert any("£300.00" in f for f in flags)
 
-    def test_no_po_flag_for_dress_order(self):
-        record = _make_record(active_dress_txn=True, has_po=False, is_dress_order=True, bal_due=500.0)
+    def test_no_po_flag_for_so_dress_order(self):
+        record = _make_record(active_dress_txn=True, has_po=False, is_dress_order=True,
+                              bal_due=500.0, prefix="SO")
         flags = _collect_flags(record)
         assert any("Purchase Order" in f for f in flags)
 
+    def test_no_po_flag_suppressed_for_layaway(self):
+        record = _make_record(active_dress_txn=True, has_po=False, is_dress_order=True,
+                              bal_due=500.0, prefix="L")
+        flags = _collect_flags(record)
+        assert not any("Purchase Order" in f for f in flags)
+
     def test_not_received_flag(self):
-        record = _make_record(active_dress_txn=True, has_po=True, has_receiving=False, bal_due=500.0)
+        record = _make_record(active_dress_txn=True, has_po=True, has_receiving=False,
+                              bal_due=500.0, prefix="SO")
         flags = _collect_flags(record)
         assert any("not yet received" in f for f in flags)
+
+    def test_not_received_flag_suppressed_for_layaway(self):
+        record = _make_record(active_dress_txn=True, has_po=True, has_receiving=False,
+                              bal_due=500.0, prefix="L")
+        flags = _collect_flags(record)
+        assert not any("not yet received" in f for f in flags)
 
     def test_clean_record_no_flags(self):
         record = _make_record(active_dress_txn=True, has_po=True, has_receiving=True, bal_due=0.0)
