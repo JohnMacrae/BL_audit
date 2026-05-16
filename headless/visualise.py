@@ -82,7 +82,7 @@ def _customer_card(record: "CustomerRecord") -> str:
         flags_html = f'<ul class="flags">{flag_items}</ul>'
 
     return f"""
-<div class="card" style="border-left:4px solid {r["border"]};background:{r["bg"]}">
+<div class="card" data-risk="{risk_key}" style="border-left:4px solid {r["border"]};background:{r["bg"]}">
   <div class="card-header">
     <div class="card-left">
       <span class="cust-name">{name}</span>
@@ -104,11 +104,16 @@ def _summary_strip(records: list) -> str:
     for r in records:
         counts[r["risk_level"]] += 1
     chips = [
-        f'<div class="chip chip-{k}" style="background:{RISK[k]["badge_bg"]}">'
-        f'{counts[k]} {RISK[k]["badge"]}</div>'
+        f'<button class="chip chip-{k}" data-filter="{k}" style="background:{RISK[k]["badge_bg"]}" aria-pressed="true">'
+        f'<span class="chip-count">{counts[k]}</span> {RISK[k]["badge"]}</button>'
         for k in ["critical", "red", "amber", "ok"]
     ]
-    return '<div class="summary-strip">' + "".join(chips) + "</div>"
+    return (
+        '<div class="summary-strip">'
+        + "".join(chips)
+        + '<span class="showing-count" id="showing-count"></span>'
+        + "</div>"
+    )
 
 
 _CSS = """
@@ -119,9 +124,14 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-s
 .header h1 { font-size: 1.3rem; font-weight: 600; }
 .header p  { font-size: 0.8rem; color: #b2bec3; margin-top: 4px; }
 .summary-strip { display: flex; gap: 10px; padding: 16px 24px; background: #fff;
-                 border-bottom: 1px solid #dfe6e9; flex-wrap: wrap; }
-.chip { color: #fff; padding: 6px 16px; border-radius: 20px;
-        font-size: 0.8rem; font-weight: 600; }
+                 border-bottom: 1px solid #dfe6e9; flex-wrap: wrap; align-items: center; }
+.chip { color: #fff; padding: 6px 16px; border-radius: 20px; border: none;
+        font-size: 0.8rem; font-weight: 600; cursor: pointer;
+        transition: opacity 0.15s, transform 0.1s; }
+.chip:hover { transform: scale(1.05); }
+.chip[aria-pressed="false"] { opacity: 0.3; }
+.chip-count { font-size: 1rem; }
+.showing-count { font-size: 0.8rem; color: #636e72; margin-left: 8px; }
 .cards { padding: 16px 24px; display: flex; flex-direction: column; gap: 12px;
          max-width: 960px; margin: 0 auto; }
 .card { border-radius: 8px; padding: 14px 16px; }
@@ -172,9 +182,51 @@ def generate_html(records: list, generated_at: datetime) -> str:
   <p>Generated: {_esc(ts)} &nbsp;|&nbsp; {total} brides (2026+)</p>
 </div>
 {summary}
-<div class="cards">
+<div class="cards" id="cards">
 {cards_html}
 </div>
+<script>
+(function () {{
+  const chips = document.querySelectorAll('.chip[data-filter]');
+  const cards = document.querySelectorAll('#cards .card');
+  const showingCount = document.getElementById('showing-count');
+  const active = new Set(['critical', 'red', 'amber', 'ok']);
+
+  function updateCount() {{
+    const visible = document.querySelectorAll('#cards .card:not([hidden])').length;
+    showingCount.textContent = visible === cards.length ? '' : visible + ' shown';
+  }}
+
+  function applyFilter() {{
+    cards.forEach(function(card) {{
+      card.hidden = active.size > 0 && !active.has(card.dataset.risk);
+    }});
+    chips.forEach(function(chip) {{
+      chip.setAttribute('aria-pressed', active.has(chip.dataset.filter) ? 'true' : 'false');
+    }});
+    updateCount();
+  }}
+
+  chips.forEach(function(chip) {{
+    chip.addEventListener('click', function() {{
+      const f = chip.dataset.filter;
+      if (active.has(f)) {{
+        // If this is the only active filter, reset to all rather than showing nothing
+        if (active.size === 1) {{
+          active.add('critical'); active.add('red'); active.add('amber'); active.add('ok');
+        }} else {{
+          active.delete(f);
+        }}
+      }} else {{
+        active.add(f);
+      }}
+      applyFilter();
+    }});
+  }});
+
+  updateCount();
+}})();
+</script>
 </body>
 </html>"""
 
