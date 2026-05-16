@@ -1,2 +1,3 @@
 git-config.txt
 headless/.env
+__pycache__/
