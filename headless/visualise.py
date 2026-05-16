@@ -82,8 +82,10 @@ def _customer_card(record: "CustomerRecord") -> str:
         flags_html = f'<ul class="flags">{flag_items}</ul>'
 
     date_key = record["wedding_date"].strftime("%Y%m%d") if record["wedding_date"] else "99999999"
+    dtw = record["days_to_wedding"]
+    future_flag = "0" if (dtw is not None and dtw < 0) else "1"
     return f"""
-<div class="card" data-risk="{risk_key}" data-date="{date_key}" style="border-left:4px solid {r["border"]};background:{r["bg"]}">
+<div class="card" data-risk="{risk_key}" data-date="{date_key}" data-future="{future_flag}" style="border-left:4px solid {r["border"]};background:{r["bg"]}">
   <div class="card-header">
     <div class="card-left">
       <span class="cust-name">{name}</span>
@@ -113,6 +115,7 @@ def _summary_strip(records: list) -> str:
         '<div class="summary-strip">'
         + "".join(chips)
         + '<button class="chip chip-all" id="btn-all">All</button>'
+        + '<button class="chip chip-time" id="btn-time" aria-pressed="true">Future</button>'
         + '<select class="sort-select" id="sort-select">'
         + '<option value="asc">Date: Earliest first</option>'
         + '<option value="desc">Date: Latest first</option>'
@@ -138,6 +141,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-s
 .chip[aria-pressed="true"] { opacity: 1; border-color: #fff; box-shadow: 0 0 0 2px rgba(0,0,0,0.25); }
 .chip-count { font-size: 1rem; }
 .chip-all   { background: #2c3e50; margin-left: 4px; }
+.chip-time  { background: #6c5ce7; margin-left: 4px; }
 .sort-select { padding: 5px 10px; border-radius: 8px; border: 1px solid #dfe6e9;
                font-size: 0.8rem; color: #2d3436; background: #fff; cursor: pointer;
                margin-left: 4px; }
@@ -200,11 +204,14 @@ def generate_html(records: list, generated_at: datetime) -> str:
 (function () {{
   const chips = document.querySelectorAll('.chip[data-filter]');
   const btnAll = document.getElementById('btn-all');
+  const btnTime = document.getElementById('btn-time');
   const sortSelect = document.getElementById('sort-select');
   const container = document.getElementById('cards');
   const showingCount = document.getElementById('showing-count');
-  // active is the SET OF SELECTED filters. Empty = show all.
+  // active: selected risk filters. Empty = show all risk levels.
   const active = new Set();
+  // showFuture: true = future weddings, false = past weddings
+  let showFuture = true;
 
   function allCards() {{
     return Array.from(container.querySelectorAll('.card'));
@@ -217,12 +224,17 @@ def generate_html(records: list, generated_at: datetime) -> str:
   }}
 
   function applyFilter() {{
+    const wantFuture = showFuture ? '1' : '0';
     allCards().forEach(function(card) {{
-      card.hidden = active.size > 0 && !active.has(card.dataset.risk);
+      const riskOk = active.size === 0 || active.has(card.dataset.risk);
+      const timeOk = card.dataset.future === wantFuture;
+      card.hidden = !(riskOk && timeOk);
     }});
     chips.forEach(function(chip) {{
       chip.setAttribute('aria-pressed', active.has(chip.dataset.filter) ? 'true' : 'false');
     }});
+    btnTime.textContent = showFuture ? 'Future' : 'Past';
+    btnTime.setAttribute('aria-pressed', 'true');
     updateCount();
   }}
 
@@ -250,11 +262,17 @@ def generate_html(records: list, generated_at: datetime) -> str:
 
   btnAll.addEventListener('click', resetAll);
 
+  btnTime.addEventListener('click', function() {{
+    showFuture = !showFuture;
+    active.clear();
+    applyFilter();
+  }});
+
   sortSelect.addEventListener('change', function() {{
     applySort(sortSelect.value);
   }});
 
-  updateCount();
+  applyFilter();
 }})();
 </script>
 </body>
