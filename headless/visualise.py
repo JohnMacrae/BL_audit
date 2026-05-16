@@ -105,7 +105,7 @@ def _summary_strip(records: list) -> str:
     for r in records:
         counts[r["risk_level"]] += 1
     chips = [
-        f'<button class="chip chip-{k}" data-filter="{k}" style="background:{RISK[k]["badge_bg"]}" aria-pressed="true">'
+        f'<button class="chip chip-{k}" data-filter="{k}" style="background:{RISK[k]["badge_bg"]}" aria-pressed="false">'
         f'<span class="chip-count">{counts[k]}</span> {RISK[k]["badge"]}</button>'
         for k in ["critical", "red", "amber", "ok"]
     ]
@@ -131,11 +131,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-s
 .header p  { font-size: 0.8rem; color: #b2bec3; margin-top: 4px; }
 .summary-strip { display: flex; gap: 10px; padding: 16px 24px; background: #fff;
                  border-bottom: 1px solid #dfe6e9; flex-wrap: wrap; align-items: center; }
-.chip { color: #fff; padding: 6px 16px; border-radius: 20px; border: none;
+.chip { color: #fff; padding: 6px 16px; border-radius: 20px; border: 3px solid transparent;
         font-size: 0.8rem; font-weight: 600; cursor: pointer;
-        transition: opacity 0.15s, transform 0.1s; }
-.chip:hover { transform: scale(1.05); }
-.chip[aria-pressed="false"] { opacity: 0.3; }
+        transition: opacity 0.15s, transform 0.1s, border-color 0.1s; opacity: 0.55; }
+.chip:hover { transform: scale(1.05); opacity: 0.85; }
+.chip[aria-pressed="true"] { opacity: 1; border-color: #fff; box-shadow: 0 0 0 2px rgba(0,0,0,0.25); }
 .chip-count { font-size: 1rem; }
 .chip-all   { background: #2c3e50; margin-left: 4px; }
 .sort-select { padding: 5px 10px; border-radius: 8px; border: 1px solid #dfe6e9;
@@ -203,8 +203,8 @@ def generate_html(records: list, generated_at: datetime) -> str:
   const sortSelect = document.getElementById('sort-select');
   const container = document.getElementById('cards');
   const showingCount = document.getElementById('showing-count');
-  const ALL_LEVELS = ['critical', 'red', 'amber', 'ok'];
-  const active = new Set(ALL_LEVELS);
+  // active is the SET OF SELECTED filters. Empty = show all.
+  const active = new Set();
 
   function allCards() {{
     return Array.from(container.querySelectorAll('.card'));
@@ -218,7 +218,7 @@ def generate_html(records: list, generated_at: datetime) -> str:
 
   function applyFilter() {{
     allCards().forEach(function(card) {{
-      card.hidden = !active.has(card.dataset.risk);
+      card.hidden = active.size > 0 && !active.has(card.dataset.risk);
     }});
     chips.forEach(function(chip) {{
       chip.setAttribute('aria-pressed', active.has(chip.dataset.filter) ? 'true' : 'false');
@@ -227,7 +227,7 @@ def generate_html(records: list, generated_at: datetime) -> str:
   }}
 
   function resetAll() {{
-    ALL_LEVELS.forEach(function(l) {{ active.add(l); }});
+    active.clear();
     applyFilter();
   }}
 
@@ -243,12 +243,7 @@ def generate_html(records: list, generated_at: datetime) -> str:
   chips.forEach(function(chip) {{
     chip.addEventListener('click', function() {{
       const f = chip.dataset.filter;
-      if (active.has(f)) {{
-        if (active.size === 1) {{ resetAll(); return; }}
-        active.delete(f);
-      }} else {{
-        active.add(f);
-      }}
+      if (active.has(f)) {{ active.delete(f); }} else {{ active.add(f); }}
       applyFilter();
     }});
   }});
