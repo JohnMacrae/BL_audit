@@ -184,4 +184,6 @@ def save_report(html_str: str, generated_at: datetime, directory: Path = HISTORY
     filename = f"report_{generated_at.strftime('%Y%m%d')}.html"
     path = directory / filename
     path.write_text(html_str, encoding="utf-8")
+    # Always keep latest.html current so the web server has a stable URL
+    (directory / "latest.html").write_text(html_str, encoding="utf-8")
     return path

@@ -1,0 +1,9 @@
+services:
+  bl-audit-web:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3201:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - /volume1/docker/BL_Audit/data/history:/data:ro
