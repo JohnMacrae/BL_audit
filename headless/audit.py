@@ -53,39 +53,62 @@ async def wait_for_table(page, timeout=20000):
 
 
 async def login(page):
-    await page.goto(f"{BRIDALLIVE_URL}/app/login", wait_until="networkidle")
-    if "/login" not in page.url:
+    # Navigate to root — hash router will redirect to #/login if not authenticated
+    await page.goto(BRIDALLIVE_URL, wait_until="domcontentloaded")
+
+    if "login" not in page.url:
         print("  Already logged in.")
         return
 
-    await page.fill(
-        'input[type="email"], input[name="email"], input[placeholder*="email" i]',
-        BL_USER,
-    )
-    await page.fill('input[type="password"]', BL_PASSWORD)
-    await page.click(
+    print(f"  Login page URL: {page.url}")
+    print("  Waiting for login form...")
+    try:
+        await page.wait_for_selector("input", timeout=20000)
+    except Exception:
+        pass
+
+    inputs = await page.evaluate("""
+        () => Array.from(document.querySelectorAll('input')).map(i => ({
+            type: i.type, name: i.name, id: i.id, placeholder: i.placeholder
+        }))
+    """)
+    print(f"  Inputs found: {inputs}")
+
+    if not inputs:
+        body = await page.evaluate("() => document.body.innerText")
+        print(f"  Body text: {body[:600]}")
+        raise RuntimeError("Login form did not render — no inputs found")
+
+    await page.locator("input[type='email'], input[type='text']").first.fill(BL_USER)
+    await page.locator("input[type='password']").first.fill(BL_PASSWORD)
+    await page.locator(
         'button[type="submit"], input[type="submit"], '
         'button:has-text("Login"), button:has-text("Sign In")'
-    )
+    ).first.click()
     await page.wait_for_load_state("networkidle")
 
-    if "/login" in page.url:
+    if "login" in page.url:
         raise RuntimeError("Login failed — check BL_USER / BL_PASSWORD in .env")
-    print("  Login successful.")
+    print(f"  Login successful. URL: {page.url}")
+
+    # Print nav links so we can identify correct report hash routes
+    nav_links = await page.evaluate(NAV_SCAN_JS)
+    print(f"  Nav links found: {nav_links}")
 
 
 async def get_report(page, primary_url, fallback_url=None):
-    await page.goto(primary_url, wait_until="networkidle")
+    await page.goto(primary_url, wait_until="domcontentloaded")
+    await page.wait_for_timeout(2000)
 
-    if any(x in page.url for x in ["/login", "/dashboard"]) or \
-            page.url.rstrip("/") == BRIDALLIVE_URL + "/app":
+    if "login" in page.url or "dashboard" in page.url:
         if fallback_url:
-            print(f"  Primary URL redirected, trying fallback: {fallback_url}")
-            await page.goto(fallback_url, wait_until="networkidle")
+            print(f"  Primary URL redirected ({page.url}), trying fallback: {fallback_url}")
+            await page.goto(fallback_url, wait_until="domcontentloaded")
+            await page.wait_for_timeout(2000)
         else:
             nav_links = await page.evaluate(NAV_SCAN_JS)
-            return {"headers": [], "rows": [], "error": f"Redirected from {primary_url}",
-                    "nav_links": nav_links}
+            print(f"  Redirected from {primary_url} — nav links: {nav_links}")
+            return {"headers": [], "rows": [], "error": f"Redirected from {primary_url}"}
 
     try:
         sel = page.locator('select').filter(has_text="Status")
@@ -110,36 +133,51 @@ async def get_report(page, primary_url, fallback_url=None):
 
 async def main():
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
+        browser = await p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
+        )
+        context = await browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            viewport={"width": 1280, "height": 800},
+        )
+        await context.add_init_script(
+            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+        )
+        page = await context.new_page()
 
         print("Step 0 — Login")
         await login(page)
 
         print("Step 1A — Sales Transactions")
-        sales = await get_report(page, f"{BRIDALLIVE_URL}/app/reports/sales-transactions")
+        sales = await get_report(
+            page,
+            f"{BRIDALLIVE_URL}/#/sales-orders",
+            f"{BRIDALLIVE_URL}/#/transactions",
+        )
 
         print("Step 1B — Purchase Orders")
-        pos = await get_report(
-            page,
-            f"{BRIDALLIVE_URL}/app/reports/purchase-orders",
-            f"{BRIDALLIVE_URL}/app/purchaseorders",
-        )
+        pos = await get_report(page, f"{BRIDALLIVE_URL}/#/purchase-orders")
 
         print("Step 1C — Layaway / Payments")
         payments = await get_report(
             page,
-            f"{BRIDALLIVE_URL}/app/reports/layaway",
-            f"{BRIDALLIVE_URL}/app/reports/payments",
+            f"{BRIDALLIVE_URL}/#/layaway",
+            f"{BRIDALLIVE_URL}/#/payments",
         )
 
         print("Step 1D — Receiving")
         receiving = await get_report(
             page,
-            f"{BRIDALLIVE_URL}/app/reports/receiving",
-            f"{BRIDALLIVE_URL}/app/inventory/receiving",
+            f"{BRIDALLIVE_URL}/#/receiving",
+            f"{BRIDALLIVE_URL}/#/inventory",
         )
 
+        await context.close()
         await browser.close()
 
     print("Step 2 — Cross-referencing...")
