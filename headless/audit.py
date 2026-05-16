@@ -9,18 +9,26 @@ import asyncio
 import os
 import sys
 from datetime import datetime
+from pathlib import Path
 from playwright.async_api import async_playwright
 
 sys.path.insert(0, "/gmail")
 from gmail_client import send_email as gmail_send
 
 from audit_logic import cross_reference, format_report
+from parse_contacts import load_contacts
+from parse_journal import load_journal
+from stitcher import stitch
+from visualise import generate_html, save_report
 
 BRIDALLIVE_URL = "https://app.bridallive.com"
 PERIOD_DAYS = int(os.getenv("AUDIT_DAYS", "90"))
 RECIPIENT = os.getenv("REPORT_EMAIL", "jramacrae@gmail.com")
 BL_USER = os.getenv("BL_USER")
 BL_PASSWORD = os.getenv("BL_PASSWORD")
+JOURNAL_PATH = os.getenv("JOURNAL_PATH", "/data/transactionItemJournal.csv")
+CONTACTS_PATH = os.getenv("CONTACTS_PATH", "/data/contacts.csv")
+HISTORY_DIR = Path(os.getenv("HISTORY_DIR", "/data/history"))
 
 EXTRACT_JS = """
 () => {
@@ -186,12 +194,26 @@ async def main():
     report = format_report(findings, len(sales.get("rows", [])), PERIOD_DAYS)
     print("\n" + report)
 
-    print(f"\nStep 3 — Emailing report to {RECIPIENT}...")
+    print("Step 2B — Building visual progress report...")
+    contacts = load_contacts(CONTACTS_PATH, min_year=2026)
+    transactions = load_journal(JOURNAL_PATH)
+    records = stitch(contacts, transactions, pos.get("rows", []), receiving.get("rows", []))
+    html_report = generate_html(records, datetime.now())
+    saved_path = save_report(html_report, datetime.now(), HISTORY_DIR)
+    print(f"  Visual report saved to {saved_path} ({len(records)} brides)")
+
+    print(f"\nStep 3 — Emailing reports to {RECIPIENT}...")
     today_str = datetime.now().strftime("%d/%m/%Y")
     gmail_send(
         to=RECIPIENT,
         subject=f"BridalLive Audit Report — {today_str}",
         body=report,
+    )
+    gmail_send(
+        to=RECIPIENT,
+        subject=f"Serenity Brides Customer Progress — {today_str}",
+        body=html_report,
+        html=True,
     )
     print("Done.")
 

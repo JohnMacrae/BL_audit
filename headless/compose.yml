@@ -5,4 +5,7 @@ services:
     volumes:
       - /volume1/docker/gmail-mcp/gmail_client.py:/gmail/gmail_client.py:ro
       - /volume1/docker/gmail-mcp/config/jramacrae:/gmail-config:ro
+      - /volume1/docker/BL_Audit/data/transactionItemJournal.csv:/data/transactionItemJournal.csv:ro
+      - /volume1/docker/BL_Audit/data/contacts_2026.csv:/data/contacts.csv:ro
+      - /volume1/docker/BL_Audit/data/history:/data/history:rw
     network_mode: bridge
