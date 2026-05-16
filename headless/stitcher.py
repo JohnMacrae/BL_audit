@@ -29,6 +29,7 @@ class CustomerRecord(TypedDict):
     days_to_wedding: int | None
     stage: int
     stage_label: str
+    sale_status: str    # "unsold" | "selected" | "sold"
     risk_level: str
     risk_reason: str
     flags: list
@@ -166,6 +167,13 @@ def stitch(
         bal_due = active_dress_txn["bal_due"] if active_dress_txn else 0.0
         risk_level, risk_reason = _compute_risk(stage, days_to_wedding, bal_due)
 
+        if stage == 1:
+            sale_status = "unsold"
+        elif stage == 2:
+            sale_status = "selected"
+        else:
+            sale_status = "sold"
+
         record: CustomerRecord = CustomerRecord(
             customer_name=contact["full_name"],
             email=contact["email"],
@@ -177,6 +185,7 @@ def stitch(
             days_to_wedding=days_to_wedding,
             stage=stage,
             stage_label=stage_label,
+            sale_status=sale_status,
             risk_level=risk_level,
             risk_reason=risk_reason,
             flags=[],

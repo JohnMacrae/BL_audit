@@ -42,13 +42,19 @@ def _days_badge(days: int | None) -> str:
     return f'<span class="days-badge" style="background:{colour}">{days} days</span>'
 
 
-def _thermometer(stage: int) -> str:
+def _thermometer(stage: int, milestone_dates: dict | None = None) -> str:
+    if milestone_dates is None:
+        milestone_dates = {}
     segments = []
     for i, label in enumerate(STAGE_LABELS, 1):
         filled = i <= stage
         colour = FILLED_COLOUR if filled else EMPTY_COLOUR
         label_lines = label.split("\n")
         label_html = "<br>".join(_esc(l) for l in label_lines)
+        label_colour = "rgba(255,255,255,0.95)" if filled else "#636e72"
+        date_html = ""
+        if filled and i in milestone_dates:
+            date_html = f'<div class="seg-date">{_esc(milestone_dates[i])}</div>'
         border_radius = ""
         if i == 1:
             border_radius = "border-radius:6px 0 0 6px;"
@@ -56,7 +62,7 @@ def _thermometer(stage: int) -> str:
             border_radius = "border-radius:0 6px 6px 0;"
         segments.append(
             f'<div class="segment" style="background:{colour};{border_radius}">'
-            f'<div class="seg-label">{label_html}</div>'
+            f'<div class="seg-label" style="color:{label_colour}">{label_html}{date_html}</div>'
             f'</div>'
         )
     return '<div class="thermometer">' + "".join(segments) + "</div>"
@@ -84,8 +90,18 @@ def _customer_card(record: "CustomerRecord") -> str:
     date_key = record["wedding_date"].strftime("%Y%m%d") if record["wedding_date"] else "99999999"
     dtw = record["days_to_wedding"]
     future_flag = "0" if (dtw is not None and dtw < 0) else "1"
+    sale_status = record["sale_status"]
+
+    # Build milestone dates for filled thermometer segments
+    milestone_dates: dict[int, str] = {}
+    if txn and txn["date"]:
+        d = txn["date"].strftime("%d/%m/%y")
+        milestone_dates[2] = d   # Dress Selected
+        if record["stage"] >= 3:
+            milestone_dates[3] = d  # Deposit Paid (same transaction date)
+
     return f"""
-<div class="card" data-risk="{risk_key}" data-date="{date_key}" data-future="{future_flag}" style="border-left:4px solid {r["border"]};background:{r["bg"]}">
+<div class="card" data-risk="{risk_key}" data-date="{date_key}" data-future="{future_flag}" data-sale="{sale_status}" style="border-left:4px solid {r["border"]};background:{r["bg"]}">
   <div class="card-header">
     <div class="card-left">
       <span class="cust-name">{name}</span>
@@ -97,25 +113,38 @@ def _customer_card(record: "CustomerRecord") -> str:
       {badge}
     </div>
   </div>
-  {_thermometer(record["stage"])}
+  {_thermometer(record["stage"], milestone_dates)}
   {flags_html}
 </div>"""
 
 
+_SALE_COLOURS = {"sold": "#0984e3", "selected": "#00b894", "unsold": "#636e72"}
+_SALE_LABELS  = {"sold": "Sold", "selected": "Selected", "unsold": "Unsold"}
+
+
 def _summary_strip(records: list) -> str:
     counts = {"critical": 0, "red": 0, "amber": 0, "ok": 0}
+    sale_counts = {"sold": 0, "selected": 0, "unsold": 0}
     for r in records:
         counts[r["risk_level"]] += 1
+        sale_counts[r["sale_status"]] += 1
     chips = [
         f'<button class="chip chip-{k}" data-filter="{k}" style="background:{RISK[k]["badge_bg"]}" aria-pressed="false">'
         f'<span class="chip-count">{counts[k]}</span> {RISK[k]["badge"]}</button>'
         for k in ["critical", "red", "amber", "ok"]
+    ]
+    sale_chips = [
+        f'<button class="chip chip-sale" data-sale="{k}" style="background:{_SALE_COLOURS[k]}" aria-pressed="{"true" if k == "sold" else "false"}">'
+        f'<span class="chip-count">{sale_counts[k]}</span> {_SALE_LABELS[k]}</button>'
+        for k in ["sold", "selected", "unsold"]
     ]
     return (
         '<div class="summary-strip">'
         + "".join(chips)
         + '<button class="chip chip-all" id="btn-all">All</button>'
         + '<button class="chip chip-time" id="btn-time" aria-pressed="true">Future</button>'
+        + '<span class="strip-divider"></span>'
+        + "".join(sale_chips)
         + '<select class="sort-select" id="sort-select">'
         + '<option value="asc">Date: Earliest first</option>'
         + '<option value="desc">Date: Latest first</option>'
@@ -168,6 +197,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-s
               justify-content: center; }
 .seg-label  { font-size: 0.7rem; text-align: center; color: #2d3436; line-height: 1.25;
               font-weight: 500; }
+.seg-date   { font-size: 0.6rem; color: rgba(255,255,255,0.85); margin-top: 1px; }
+.strip-divider { width: 1px; background: #dfe6e9; align-self: stretch; margin: 0 4px; }
 .flags      { list-style: none; margin-top: 4px; }
 .flags li   { font-size: 0.78rem; color: #d35400; padding: 2px 0; }
 @media print {
@@ -203,15 +234,15 @@ def generate_html(records: list, generated_at: datetime) -> str:
 <script>
 (function () {{
   const chips = document.querySelectorAll('.chip[data-filter]');
+  const saleChips = document.querySelectorAll('.chip[data-sale]');
   const btnAll = document.getElementById('btn-all');
   const btnTime = document.getElementById('btn-time');
   const sortSelect = document.getElementById('sort-select');
   const container = document.getElementById('cards');
   const showingCount = document.getElementById('showing-count');
-  // active: selected risk filters. Empty = show all risk levels.
   const active = new Set();
-  // showFuture: true = future weddings, false = past weddings
   let showFuture = true;
+  let showSale = 'sold';
 
   function allCards() {{
     return Array.from(container.querySelectorAll('.card'));
@@ -228,10 +259,14 @@ def generate_html(records: list, generated_at: datetime) -> str:
     allCards().forEach(function(card) {{
       const riskOk = active.size === 0 || active.has(card.dataset.risk);
       const timeOk = card.dataset.future === wantFuture;
-      card.hidden = !(riskOk && timeOk);
+      const saleOk = showSale === 'all' || card.dataset.sale === showSale;
+      card.hidden = !(riskOk && timeOk && saleOk);
     }});
     chips.forEach(function(chip) {{
       chip.setAttribute('aria-pressed', active.has(chip.dataset.filter) ? 'true' : 'false');
+    }});
+    saleChips.forEach(function(chip) {{
+      chip.setAttribute('aria-pressed', chip.dataset.sale === showSale ? 'true' : 'false');
     }});
     btnTime.textContent = showFuture ? 'Future' : 'Past';
     btnTime.setAttribute('aria-pressed', 'true');
@@ -266,6 +301,14 @@ def generate_html(records: list, generated_at: datetime) -> str:
     showFuture = !showFuture;
     active.clear();
     applyFilter();
+  }});
+
+  saleChips.forEach(function(chip) {{
+    chip.addEventListener('click', function() {{
+      const s = chip.dataset.sale;
+      showSale = (showSale === s) ? 'all' : s;
+      applyFilter();
+    }});
   }});
 
   sortSelect.addEventListener('change', function() {{
