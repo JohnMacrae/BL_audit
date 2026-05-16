@@ -81,8 +81,9 @@ def _customer_card(record: "CustomerRecord") -> str:
         flag_items = "".join(f'<li>&#9888; {_esc(f)}</li>' for f in record["flags"])
         flags_html = f'<ul class="flags">{flag_items}</ul>'
 
+    date_key = record["wedding_date"].strftime("%Y%m%d") if record["wedding_date"] else "99999999"
     return f"""
-<div class="card" data-risk="{risk_key}" style="border-left:4px solid {r["border"]};background:{r["bg"]}">
+<div class="card" data-risk="{risk_key}" data-date="{date_key}" style="border-left:4px solid {r["border"]};background:{r["bg"]}">
   <div class="card-header">
     <div class="card-left">
       <span class="cust-name">{name}</span>
@@ -111,6 +112,11 @@ def _summary_strip(records: list) -> str:
     return (
         '<div class="summary-strip">'
         + "".join(chips)
+        + '<button class="chip chip-all" id="btn-all">All</button>'
+        + '<select class="sort-select" id="sort-select">'
+        + '<option value="asc">Date: Earliest first</option>'
+        + '<option value="desc">Date: Latest first</option>'
+        + '</select>'
         + '<span class="showing-count" id="showing-count"></span>'
         + "</div>"
     )
@@ -131,6 +137,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-s
 .chip:hover { transform: scale(1.05); }
 .chip[aria-pressed="false"] { opacity: 0.3; }
 .chip-count { font-size: 1rem; }
+.chip-all   { background: #2c3e50; margin-left: 4px; }
+.sort-select { padding: 5px 10px; border-radius: 8px; border: 1px solid #dfe6e9;
+               font-size: 0.8rem; color: #2d3436; background: #fff; cursor: pointer;
+               margin-left: 4px; }
 .showing-count { font-size: 0.8rem; color: #636e72; margin-left: 8px; }
 .cards { padding: 16px 24px; display: flex; flex-direction: column; gap: 12px;
          max-width: 960px; margin: 0 auto; }
@@ -150,9 +160,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-s
 .risk-badge { color: #fff; padding: 3px 10px; border-radius: 12px;
               font-size: 0.75rem; font-weight: 700; }
 .thermometer { display: flex; gap: 2px; height: 36px; margin-bottom: 8px; }
-.segment    { flex: 1; display: flex; align-items: flex-end; padding-bottom: 2px;
+.segment    { flex: 1; display: flex; align-items: flex-end; padding-bottom: 3px;
               justify-content: center; }
-.seg-label  { font-size: 0.58rem; text-align: center; color: #636e72; line-height: 1.2; }
+.seg-label  { font-size: 0.7rem; text-align: center; color: #2d3436; line-height: 1.25;
+              font-weight: 500; }
 .flags      { list-style: none; margin-top: 4px; }
 .flags li   { font-size: 0.78rem; color: #d35400; padding: 2px 0; }
 @media print {
@@ -188,18 +199,26 @@ def generate_html(records: list, generated_at: datetime) -> str:
 <script>
 (function () {{
   const chips = document.querySelectorAll('.chip[data-filter]');
-  const cards = document.querySelectorAll('#cards .card');
+  const btnAll = document.getElementById('btn-all');
+  const sortSelect = document.getElementById('sort-select');
+  const container = document.getElementById('cards');
   const showingCount = document.getElementById('showing-count');
-  const active = new Set(['critical', 'red', 'amber', 'ok']);
+  const ALL_LEVELS = ['critical', 'red', 'amber', 'ok'];
+  const active = new Set(ALL_LEVELS);
+
+  function allCards() {{
+    return Array.from(container.querySelectorAll('.card'));
+  }}
 
   function updateCount() {{
-    const visible = document.querySelectorAll('#cards .card:not([hidden])').length;
+    const cards = allCards();
+    const visible = cards.filter(function(c) {{ return !c.hidden; }}).length;
     showingCount.textContent = visible === cards.length ? '' : visible + ' shown';
   }}
 
   function applyFilter() {{
-    cards.forEach(function(card) {{
-      card.hidden = active.size > 0 && !active.has(card.dataset.risk);
+    allCards().forEach(function(card) {{
+      card.hidden = !active.has(card.dataset.risk);
     }});
     chips.forEach(function(chip) {{
       chip.setAttribute('aria-pressed', active.has(chip.dataset.filter) ? 'true' : 'false');
@@ -207,21 +226,37 @@ def generate_html(records: list, generated_at: datetime) -> str:
     updateCount();
   }}
 
+  function resetAll() {{
+    ALL_LEVELS.forEach(function(l) {{ active.add(l); }});
+    applyFilter();
+  }}
+
+  function applySort(order) {{
+    const cards = allCards();
+    cards.sort(function(a, b) {{
+      const da = a.dataset.date, db = b.dataset.date;
+      return order === 'asc' ? da.localeCompare(db) : db.localeCompare(da);
+    }});
+    cards.forEach(function(c) {{ container.appendChild(c); }});
+  }}
+
   chips.forEach(function(chip) {{
     chip.addEventListener('click', function() {{
       const f = chip.dataset.filter;
       if (active.has(f)) {{
-        // If this is the only active filter, reset to all rather than showing nothing
-        if (active.size === 1) {{
-          active.add('critical'); active.add('red'); active.add('amber'); active.add('ok');
-        }} else {{
-          active.delete(f);
-        }}
+        if (active.size === 1) {{ resetAll(); return; }}
+        active.delete(f);
       }} else {{
         active.add(f);
       }}
       applyFilter();
     }});
+  }});
+
+  btnAll.addEventListener('click', resetAll);
+
+  sortSelect.addEventListener('change', function() {{
+    applySort(sortSelect.value);
   }});
 
   updateCount();
